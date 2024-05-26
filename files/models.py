@@ -623,6 +623,7 @@ class Media(models.Model):
         whether it has failed or succeeded
         """
 
+        logger.info("Tracing HLS - Starting encode action for friendly token %s" % self.friendly_token)
         self.set_encoding_status()
 
         # set a preview url
@@ -640,6 +641,8 @@ class Media(models.Model):
             from . import tasks
 
             tasks.create_hls(self.friendly_token)
+
+        logger.info("Tracing HLS - Finished post encode action for friendly token %s" % self.friendly_token)
 
         return True
 
@@ -1449,6 +1452,7 @@ def encoding_file_save(sender, instance, created, **kwargs):
     concatenate chunks, create final encoding file and delete chunks
     """
 
+    logger.info("Tracing HLS - Starting encoding file save for friendly token %s" % instance.media.friendly_token)
     if instance.chunk and instance.status == "success":
         # a chunk got completed
 
@@ -1456,6 +1460,7 @@ def encoding_file_save(sender, instance, created, **kwargs):
         # then concatenate to new Encoding - and remove chunks
         # this should run only once!
         if instance.media_file:
+            logger.info("Tracing HLS - Have media file for friendly token %s" % instance.media.friendly_token)
             try:
                 orig_chunks = json.loads(instance.chunks_info).keys()
             except BaseException:
@@ -1478,11 +1483,12 @@ def encoding_file_save(sender, instance, created, **kwargs):
                     break
 
             for chunk in chunks:
-                if not (chunk.media_file and chunk.media_file.path):
+                if not (chunk.media_file and chunk.media_file.path) or not (chunk.status in ["fail", "success"]):
                     complete = False
                     break
 
             if complete:
+                logger.info("Tracing HLS - Media is complete for friendly token %s" % instance.media.friendly_token)
                 # concatenate chunks and create final encoding file
                 chunks_paths = [f.media_file.path for f in chunks]
 
@@ -1527,6 +1533,7 @@ def encoding_file_save(sender, instance, created, **kwargs):
                     encoding.total_run_time = (end_date - start_date).seconds
                     encoding.save()
 
+                    logger.info("Tracing HLS - Combining chunks for friendly token %s" % instance.media.friendly_token)
                     with open(tf, "rb") as f:
                         myfile = File(f)
                         output_name = "{0}.{1}".format(
@@ -1547,13 +1554,16 @@ def encoding_file_save(sender, instance, created, **kwargs):
                             chunks_info=instance.chunks_info,
                         ).count()
                     ):
+                        logger.info("Tracing HLS - Detected duplicate task and removing files for friendly token %s" % instance.media.friendly_token)
                         # if two chunks are finished at the same time, this
                         # will be changed
                         who = Encoding.objects.filter(media=encoding.media, profile=encoding.profile).exclude(id=encoding.id)
                         who.delete()
                     else:
+                        logger.info("Tracing HLS - Didn't detect duplicate task for friendly token %s" % instance.media.friendly_token)
                         encoding.delete()
                     if not Encoding.objects.filter(chunks_info=instance.chunks_info):
+                        logger.info("Tracing HLS - Removing chunks for friendly token %s" % instance.media.friendly_token)
                         # TODO: in case of remote workers, files should be deleted
                         # example
                         # for worker in workers:
@@ -1561,9 +1571,11 @@ def encoding_file_save(sender, instance, created, **kwargs):
                         #        remove_media_file.delay(media_file=chunk)
                         for chunk in json.loads(instance.chunks_info).keys():
                             helpers.rm_file(chunk)
+                    logger.info("Tracing HLS - Starting post encode actions for friendly token %s" % instance.media.friendly_token)
                     instance.media.post_encode_actions(encoding=instance, action="add")
 
     elif instance.chunk and instance.status == "fail":
+        logger.info("Tracing HLS - Chunk failed for friendly token %s" % instance.media.friendly_token)
         encoding = Encoding(media=instance.media, profile=instance.profile, status="fail", progress=100)
 
         chunks = Encoding.objects.filter(media=instance.media, chunks_info=instance.chunks_info, chunk=True).order_by("add_date")
@@ -1584,6 +1596,7 @@ def encoding_file_save(sender, instance, created, **kwargs):
         who.delete()
         # TODO: merge with above if, do not repeat code
     else:
+        logger.info("Tracing HLS - Faillback for non-chunks for friendly token %s" % instance.media.friendly_token)
         if instance.status in ["fail", "success"]:
             instance.media.post_encode_actions(encoding=instance, action="add")
 
