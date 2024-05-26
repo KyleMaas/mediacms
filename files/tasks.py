@@ -323,6 +323,7 @@ def encode_media(
                         # ffmpeg error, or ffmpeg was killed
                         raise
             except Exception as e:
+                logger.warning("Encoding exception {0}".format(e.message))
                 try:
                     # output is empty, fail message is on the exception
                     output = e.message
@@ -423,6 +424,7 @@ def create_hls(friendly_token):
         return False
 
     p = media.uid.hex
+    logger.info("Tracing HLS - Starting HLS creation for media UID %s" % p)
     output_dir = os.path.join(settings.HLS_DIR, p)
     encodings = media.encodings.filter(profile__extension="mp4", status="success", chunk=False, profile__codec="h264")
     if encodings:
@@ -437,13 +439,18 @@ def create_hls(friendly_token):
             # override content with -T !
             cmd = "cp -rT {0} {1}".format(output_dir, existing_output_dir)
             subprocess.run(cmd, stdout=subprocess.PIPE, shell=True)
-            shutil.rmtree(output_dir)
+            try:
+                shutil.rmtree(output_dir)
+            except FileNotFoundError:
+                logger.info("Tracing HLS - rmtree failure because file not found for media UID %s" % p)
+                pass
             output_dir = existing_output_dir
         pp = os.path.join(output_dir, "master.m3u8")
         if os.path.exists(pp):
             if media.hls_file != pp:
                 media.hls_file = pp
                 media.save(update_fields=["hls_file"])
+    logger.info("Tracing HLS - Finished HLS creation for media UID %s" % p)
     return True
 
 
